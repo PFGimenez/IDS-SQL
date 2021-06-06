@@ -1,30 +1,71 @@
 use regex::Regex;
 use sqlparser::tokenizer::Token;
+use sqlparser::tokenizer::Whitespace;
+use crate::tokens::{normalize_once};
+// use std::time::SystemTime;
 
 #[derive(Debug, Clone)]
 pub struct Template {
     re: Regex, // a compiled regex
-    inj_tok: Vec<(Token,usize)> // a list of token that represent valid injections
+    inj_tokens: Vec<(Token,usize)>, // a list of token that represent valid injections. The indexes must be increasing
+    // last_usage: SystemTime
 }
 
 impl Template {
-    pub fn new(template_parts: &Vec<&str>, inj_tok: Vec<(Token,usize)>) -> Template {
-        assert_eq!(inj_tok.len() + 1, template_parts.len());
-        let mut iter = template_parts.iter();
-        let mut regex = String::from("^") + &regex::escape(iter.next().unwrap());
-        loop
-        {
-            // construct the RE in the form : ^ p1 .* p2 .* p3 $
-            match iter.next() {
-                None => break,
-                Some(p) => {
-                    regex += ".*";
-                    regex += &regex::escape(p);
-                }
+    pub fn new(template_tokens: &Vec<Token>, mut inj_indexes: Vec<usize>) -> Template {
+        // construct the regex from the tokens
+        let mut start : usize = 0;
+        let mut regex = String::from("^");
+        for t in inj_indexes.iter() {
+            let mut query = String::from("");
+            assert!(*t>=start); // verify the order of the inj_indexes
+            for i in start..*t {
+                query += &format!("{}", template_tokens[i]);
             }
+            start = t + 1;
+            regex += &regex::escape(&query);
+            regex += ".*";
         }
-        regex += "$";
-        Template { re: Regex::new(&regex).unwrap(), inj_tok }
+        let mut query = String::from("");
+        assert!(template_tokens.len()>=start);
+        for i in start..template_tokens.len() {
+            query += &format!("{}", template_tokens[i]);
+        }
+        regex += &regex::escape(&query);
+        regex += "^";
+        // println!("Regex: {}", regex);
+
+        // convert injections indexes from real tokens to normalized tokens
+        let mut norm_index = 0;
+        let mut curr_index = 0;
+        let mut norm_inj_indexes = Vec::new();
+        inj_indexes.reverse(); // first tokens at the end so we can pop
+        match inj_indexes.pop() {
+            Some(mut inj_index) =>
+            {
+                loop {
+                    // println!("{} {}", inj_index, curr_index);
+                    if inj_index == curr_index {
+                        norm_inj_indexes.push((normalize_once(template_tokens[curr_index].clone()).expect("Injection is a whitespace !"),norm_index));
+                        // println!("New index: {}",norm_index);
+                        match inj_indexes.pop() {
+                            Some(next_inj_index) => inj_index = next_inj_index,
+                            None => break
+                        }
+                    }
+                    match template_tokens[curr_index] {
+                        Token::Whitespace(Whitespace::Space) => (),
+                        Token::Whitespace(Whitespace::Newline) => (),
+                        Token::Whitespace(Whitespace::Tab) => (),
+                        _ => norm_index += 1
+                    };
+                    curr_index += 1;
+                }
+            },
+            None => () // no injection at all
+        }
+
+        Template { re: Regex::new(&regex).unwrap(), inj_tokens: norm_inj_indexes }
     }
 
     pub fn is_match(&self, s: &str) -> bool {
@@ -32,8 +73,7 @@ impl Template {
     }
 
     pub fn is_legitimate(&self, input: &Vec<Token>) -> bool {
-        for t in 1..self.inj_tok.len() { // only check the injections
-            let (t1,u) = &self.inj_tok[t];
+        for (t1,u) in self.inj_tokens.iter() { // only check the injections
             let t2 = &input[*u];
             if t1 != t2 {
                 return false
@@ -41,4 +81,5 @@ impl Template {
         }
         true
     }
+
 }
