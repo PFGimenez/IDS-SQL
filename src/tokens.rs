@@ -1,3 +1,5 @@
+use std::fmt;
+
 use sqlparser::tokenizer::Tokenizer;
 use sqlparser::dialect::GenericDialect;
 use sqlparser::tokenizer::Token;
@@ -12,6 +14,16 @@ pub struct PrunedTokens(pub Vec<Token>); // no whitespace
 
 #[derive(Debug,Clone,Hash,PartialEq,Eq)]
 pub struct RawTokens(pub Vec<Token>);
+
+impl fmt::Display for RawTokens {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut s = String::new();
+        for t in &self.0 {
+            s += &format!("{}", t);
+        }
+        write!(f, "{}", s)
+    }
+}
 
 pub fn tokenize(req: &str) -> RawTokens {
     let dialect = GenericDialect {};
