@@ -1,7 +1,6 @@
 use regex::Regex;
 use sqlparser::tokenizer::Token;
-use sqlparser::tokenizer::Whitespace;
-use crate::tokens::{normalize_once,NormalizedTokens,RawTokens};
+use crate::tokens::{normalize_once,NormalizedTokens,RawTokens,is_whitespace};
 // use std::time::SystemTime;
 
 #[derive(Debug, Clone)]
@@ -14,59 +13,28 @@ pub struct Template {
 impl Template {
     pub fn new(template_tokens: &RawTokens, mut inj_indexes: Vec<usize>) -> Template {
         // construct the regex from the tokens
-        let mut start : usize = 0;
         let mut regex = String::from("^");
-        for t in inj_indexes.iter() {
-            let mut query = String::from("");
-            assert!(*t>=start); // verify the order of the inj_indexes
-            for i in start..*t {
-                query += &format!("{}", template_tokens.0[i]);
+        inj_indexes.reverse();
+        let mut inj_tokens = Vec::new();
+        let mut next_inj_index = inj_indexes.pop();
+        let mut new_index = 0;
+        for i in 0..template_tokens.0.len() {
+            let t = &template_tokens.0[i];
+            if next_inj_index.is_some() && !is_whitespace(t) && next_inj_index.unwrap()==new_index {
+                regex += ".*";
+                inj_tokens.push((normalize_once(t.clone()).unwrap(), new_index)); // unwrap is safe due to condition
+                next_inj_index = inj_indexes.pop();
             }
-            start = t + 1;
-            regex += &regex::escape(&query);
-            regex += ".*";
+            else {
+                regex += &regex::escape(&format!("{}", t));
+            }
+            if !is_whitespace(t) {
+                new_index += 1;
+            }
         }
-        let mut query = String::from("");
-        assert!(template_tokens.0.len()>=start);
-        for i in start..template_tokens.0.len() {
-            query += &format!("{}", template_tokens.0[i]);
-        }
-        regex += &regex::escape(&query);
-        regex += "^";
-        // println!("Regex: {}", regex);
+        regex += "$";
 
-        // convert injections indexes from real tokens to normalized tokens
-        let mut norm_index = 0;
-        let mut curr_index = 0;
-        let mut norm_inj_indexes = Vec::new();
-        inj_indexes.reverse(); // first tokens at the end so we can pop
-        match inj_indexes.pop() {
-            Some(mut inj_index) =>
-            {
-                loop {
-                    // println!("{} {}", inj_index, curr_index);
-                    if inj_index == curr_index {
-                        // norm_inj_indexes.push((normalize_once(template_tokens.0[curr_index].clone()).expect("Injection is a whitespace !"),norm_index));
-                        norm_inj_indexes.push((normalize_once(template_tokens.0[curr_index].clone()).expect("Injection is a whitespace !"),curr_index));
-                        // println!("New index: {}",norm_index);
-                        match inj_indexes.pop() {
-                            Some(next_inj_index) => inj_index = next_inj_index,
-                            None => break
-                        }
-                    }
-                    match template_tokens.0[curr_index] {
-                        Token::Whitespace(Whitespace::Space) => (),
-                        Token::Whitespace(Whitespace::Newline) => (),
-                        Token::Whitespace(Whitespace::Tab) => (),
-                        _ => norm_index += 1
-                    };
-                    curr_index += 1;
-                }
-            },
-            None => () // no injection at all
-        }
-
-        Template { re: Regex::new(&regex).unwrap(), inj_tokens: norm_inj_indexes }
+        Template { re: Regex::new(&regex).unwrap(), inj_tokens }
     }
 
     pub fn is_match(&self, s: &str) -> bool {

@@ -49,30 +49,27 @@ impl Ids {
     fn learn(&mut self, tokens: RawTokens) {
         let pruned_tokens = prune(tokens.clone());
         let norm_tokens = normalize(tokens.clone());
-        println!("{:?}", pruned_tokens);
         let queries = self.unmatched_queries.entry(norm_tokens.clone()).or_insert(Vec::new());
-        println!("Number of queries : {}", queries.len());
         // if enough example, create a new template
         if queries.len() >= MINIMUM_QUERIES_FOR_LEARNING {
             let mut injections = Vec::new();
-            let mut last = false;
+            // let mut last = false;
             for i in 0..pruned_tokens.0.len() {
                 let t = &pruned_tokens.0[i];
-                let mut current = false;
+                // let mut current = false;
                 for q in queries.iter() {
                     if &q.0[i] != t {
-                        println!("Injection point : {}",i);
                         injections.push(i);
-                        current = true;
-                        assert!(!last);
-                        last = true;
+                        // current = true;
+                        // assert!(!last);
+                        // last = true;
                         break;
                     }
                 }
-                last = current;
+                // last = current;
             }
             let t = Template::new(&tokens, injections);
-            println!("{:?}", t);
+            println!("New template: {:?}", t);
             self.templates.push(t);
             self.unmatched_queries.clear();
         } else {

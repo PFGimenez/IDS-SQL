@@ -37,7 +37,7 @@ pub fn normalize_once(t: Token) -> Option<Token> {
 
 }
 
-fn is_whitespace(t: &Token) -> bool {
+pub fn is_whitespace(t: &Token) -> bool {
     match t {
         Token::Whitespace(Whitespace::Space) => true,
         Token::Whitespace(Whitespace::Newline) => true,
