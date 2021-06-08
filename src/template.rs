@@ -31,7 +31,17 @@ impl Template {
             let t = &template_tokens.0[i];
             if next_inj_index.is_some() && !is_whitespace(t) && next_inj_index.unwrap()==new_index {
                 printable += &format!("[[{}]]", t);
-                regex += ".*";
+                // injection generally don't include the quotes
+                regex += & match t {
+                    Token::SingleQuotedString(_) => String::from("'.*'"),
+                    Token::NationalStringLiteral(_) => String::from("N'.*'"),
+                    Token::HexStringLiteral(_) => String::from("X'.*'"),
+                    Token::Word(w) => match w.quote_style {
+                        Some(c) => format!("{}.*{}",c,c),
+                        _ => String::from(".*")
+                        },
+                    _ => String::from(".*")
+                };
                 inj_tokens.push((normalize_once(t.clone()).unwrap(), new_index)); // unwrap is safe due to condition
                 next_inj_index = inj_indexes.pop();
             }
@@ -44,7 +54,7 @@ impl Template {
             }
         }
         regex += "$";
-
+        // println!("Regex: {}", regex);
         Template { printable, re: Regex::new(&regex).unwrap(), inj_tokens }
     }
 
