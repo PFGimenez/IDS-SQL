@@ -3,8 +3,8 @@ use std::fmt;
 use sqlparser::tokenizer::Tokenizer;
 use sqlparser::dialect::GenericDialect;
 use sqlparser::tokenizer::Token;
-use sqlparser::tokenizer::Word;
 use sqlparser::tokenizer::Whitespace;
+use sqlparser::tokenizer::TokenizerError;
 
 #[derive(Debug,Clone,Hash,PartialEq,Eq)]
 pub struct NormalizedTokens(pub Vec<Token>); // no whitespace, value removed
@@ -25,9 +25,9 @@ impl fmt::Display for RawTokens {
     }
 }
 
-pub fn tokenize(req: &str) -> RawTokens {
+pub fn tokenize(req: &str) -> Result<RawTokens,TokenizerError> {
     let dialect = GenericDialect {};
-    RawTokens(Tokenizer::new(&dialect, req).tokenize().unwrap())
+    Ok(RawTokens(Tokenizer::new(&dialect, req).tokenize()?))
 }
 
 pub fn normalize_once(t: Token) -> Option<Token> {

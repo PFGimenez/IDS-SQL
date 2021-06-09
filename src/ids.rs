@@ -3,12 +3,14 @@ use std::time::SystemTime;
 use std::collections::HashMap;
 use std::fmt;
 
+use sqlparser::tokenizer::TokenizerError;
 use crate::template::Template;
 use crate::tokens::*;
 
 #[derive(Debug)]
 pub enum ReqFate {
     Unknown,
+    Trusted,
     Pass(String),
     Del(Vec<String>)
 }
@@ -17,6 +19,7 @@ impl fmt::Display for ReqFate {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             ReqFate::Unknown => write!(f, "Unknown: no template found"),
+            ReqFate::Trusted => write!(f, "Trusted"),
             ReqFate::Pass(t) => write!(f, "Pass: validated by template {}", t),
             ReqFate::Del(t) => write!(f, "Del: invalidated by templates {:?}", t),
         }
@@ -26,7 +29,7 @@ impl fmt::Display for ReqFate {
 const EXPIRY_DURATION : u64 = 60;
 
 pub struct Ids {
-    templates: HashMap<NormalizedTokens, (Vec<String>, Template, std::time::SystemTime)>
+    templates: HashMap<NormalizedTokens, (Vec<(String,bool)>, Template, std::time::SystemTime)>
 }
 
 impl Ids {
@@ -34,19 +37,25 @@ impl Ids {
         Ids { templates: HashMap::new() }
     }
 
-    pub fn handle_req(&mut self, req: &str) -> ReqFate {
+    pub fn handle_req(&mut self, req: &str, trusted: bool) -> Result<ReqFate,TokenizerError> {
         // println!("Received queries: {}",req);
         // println!("{:?}",tokenize(req));
-        let out = self.verify_req(req);
-        match out {
-            ReqFate::Unknown => self.learn(req.to_string()),
-            _ => ()
-        };
-        out
+        if trusted {
+            self.learn(req.to_string(), true);
+            Ok(ReqFate::Trusted)
+        }
+        else {
+            let out = self.verify_req(req)?;
+            match out {
+                ReqFate::Unknown => self.learn(req.to_string(), false),
+                _ => ()
+            };
+            Ok(out)
+        }
     }
 
-    fn verify_req(&mut self, req: &str) -> ReqFate {
-        let tokens = tokenize(req);
+    fn verify_req(&mut self, req: &str) -> Result<ReqFate,TokenizerError> {
+        let tokens = tokenize(req)?;
         let norm_tokens = normalize(tokens.clone());
         let mut invalid_templates = Vec::new();
         for (_,(_,t,last_use)) in self.templates.iter_mut() {
@@ -55,23 +64,21 @@ impl Ids {
                 invalid_templates.push(format!("{}",t));
                 if t.is_legitimate(&norm_tokens) {
                     *last_use = SystemTime::now();
-                    return ReqFate::Pass(format!("{}",t));
+                    return Ok(ReqFate::Pass(format!("{}",t)));
                 }
             }
         }
         match invalid_templates.is_empty() {
-            false => ReqFate::Del(invalid_templates),
-            true => {
-                ReqFate::Unknown
-            }
+            false => Ok(ReqFate::Del(invalid_templates)),
+            true => Ok(ReqFate::Unknown)
         }
     }
 
     fn clean(&mut self, t: Template) {
         // remove unmatched_queries that have been invalidated since
-        let retain = |req: &String| {
-            if t.is_match(&req) {
-                let norm_tokens = normalize(tokenize(&req));
+        let retain = |(req, trusted): &(String,bool)| {
+            if !trusted && t.is_match(&req) {
+                let norm_tokens = normalize(tokenize(&req).unwrap()); // we know that these strings are valid
                 if !t.is_legitimate(&norm_tokens) {
                     // println!("Removed query: {}", req);
                     return false
@@ -98,9 +105,9 @@ impl Ids {
         self.templates.retain(|_,(queries,_,last_time)| !queries.is_empty() && SystemTime::now().duration_since(last_time.clone()).unwrap().as_secs() < EXPIRY_DURATION); // TODO
     }
 
-    fn create_template_from_queries(queries: &Vec<String>) -> Template {
+    fn create_template_from_queries(queries: &Vec<(String,bool)>) -> Template {
         assert!(!queries.is_empty());
-        let tokens = tokenize(&queries.last().unwrap());
+        let tokens = tokenize(&queries.last().unwrap().0).unwrap(); // we know the string is valid
         let pruned_tokens = prune(tokens.clone());
         let mut injections = Vec::new();
         // let mut last = false;
@@ -108,7 +115,7 @@ impl Ids {
             let t = &pruned_tokens.0[i];
             // let mut current = false;
             for q in queries.iter() {
-                let q = prune(tokenize(&q));
+                let q = prune(tokenize(&q.0).unwrap());
                 if &q.0[i] != t {
                     injections.push(i);
                     // current = true;
@@ -123,13 +130,13 @@ impl Ids {
         Template::new(&tokens, injections)
     }
 
-    fn learn(&mut self, query: String) {
+    fn learn(&mut self, query: String, trusted: bool) {
         let mut clean_with_template = None;
-        let tokens = tokenize(&query);
+        let tokens = tokenize(&query).unwrap();
         let norm_tokens = normalize(tokens.clone());
         match self.templates.get_mut(&norm_tokens) {
             Some((queries, old_template, _)) => {
-                queries.push(query);
+                queries.push((query,trusted));
                 let t = Ids::create_template_from_queries(queries);
                 // println!("New template: {}", t);
                 if &t != old_template {
@@ -141,7 +148,7 @@ impl Ids {
             None => {
                 let t = Template::new(&tokens, Vec::new());
                 // println!("New template: {}", t);
-                self.templates.insert(norm_tokens, (vec![query], t, SystemTime::now()));
+                self.templates.insert(norm_tokens, (vec![(query,trusted)], t, SystemTime::now()));
             }
         };
         match clean_with_template {
@@ -155,7 +162,7 @@ impl Ids {
         for (_,(queries,template,last_time)) in self.templates.iter() {
             println!("{} (last use: {:?}s ago)", template, SystemTime::now().duration_since(last_time.clone()).unwrap().as_secs());
             for q in queries.iter() {
-                println!("\t{}",q);
+                println!("\t{} (trusted: {})",q.0, q.1);
             }
         }
     }
