@@ -10,15 +10,15 @@ use ids::Ids;
 fn main() -> std::io::Result<()> {
     let mut ids = Ids::new();
 
-    let f = File::open("queries2.txt")?;
+    let f = File::open("../../log_v2.txt")?;
     let reader = BufReader::new(f);
     for line in reader.lines() {
         let l = line.unwrap();
-        // println!("{}", l); 
+        println!("{}", l); 
         let fate = ids.handle_req(&l);
-        println!("  {}", fate);
+        // println!("  {}", fate);
     }
-
+    ids.summarize();
     Ok(())
 }
 

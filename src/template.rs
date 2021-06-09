@@ -2,7 +2,6 @@ use std::fmt;
 use regex::Regex;
 use sqlparser::tokenizer::Token;
 use crate::tokens::{normalize_once,NormalizedTokens,RawTokens,is_whitespace};
-// use std::time::SystemTime;
 
 #[derive(Debug, Clone)]
 pub struct Template {
@@ -10,7 +9,6 @@ pub struct Template {
     re: Regex, // a compiled regex
     norm_length: usize,
     inj_tokens: Vec<(Token,usize)>, // a list of token that represent valid injections. The indexes must be increasing
-    // last_usage: SystemTime
 }
 
 impl PartialEq for Template {
@@ -40,29 +38,20 @@ impl Template {
             let t = &template_tokens.0[i];
             if next_inj_index.is_some() && !is_whitespace(t) && next_inj_index.unwrap()==new_index {
                 // injection generally don't include the quotes
-                printable += & match t {
-                    Token::SingleQuotedString(_) => String::from("'[[string]]'"),
-                    Token::NationalStringLiteral(_) => String::from("N'[[string]]'"),
-                    Token::HexStringLiteral(_) => String::from("X'[[string]]'"),
+                let (l,r) = match t {
+                    Token::SingleQuotedString(_) => (String::from("'"),String::from("'")),
+                    Token::NationalStringLiteral(_) => (String::from("N'"),String::from("'")),
+                    Token::HexStringLiteral(_) => (String::from("X'"),String::from("'")),
                     Token::Word(w) => match w.quote_style {
-                        Some(c) => format!("{}[[string]]{}",c,c),
-                        _ => String::from("[[string]]")
+
+                        Some(c) => (String::from(c),String::from(c)),
+                        _ => (String::new(), String::new())
                         },
-                    _ => format!("[[{}]]",t)
+                    _ => (String::new(), String::new())
                 };
 
-
-                // injection generally don't include the quotes
-                regex += & match t {
-                    Token::SingleQuotedString(_) => String::from("'.*'"),
-                    Token::NationalStringLiteral(_) => String::from("N'.*'"),
-                    Token::HexStringLiteral(_) => String::from("X'.*'"),
-                    Token::Word(w) => match w.quote_style {
-                        Some(c) => format!("{}.*{}",c,c),
-                        _ => String::from(".*")
-                        },
-                    _ => String::from(".*")
-                };
+                printable += &(l.clone() + "[[INJECTION]]" + &r);
+                regex += &(l + ".*" + &r);
                 inj_tokens.push((normalize_once(t.clone()).unwrap(), new_index)); // unwrap is safe due to condition
                 next_inj_index = inj_indexes.pop();
             }
@@ -84,13 +73,13 @@ impl Template {
     }
 
     pub fn is_legitimate(&self, input: &NormalizedTokens) -> bool {
-        if input.0.len() != self.norm_length {
-            return false
+        if input.0.len() != self.norm_length { // wrong size
+            false
         } else {
             for (t1,u) in self.inj_tokens.iter() { // only check the injections
                 let t2 = &input.0[*u];
                 if t1 != t2 {
-                    println!("Injection detected ! Expected: {:?}. Received: {:?}.", t1, t2);
+                    // println!("Injection detected ! Expected: {:?}. Received: {:?}.", t1, t2);
                     return false
                 }
             }

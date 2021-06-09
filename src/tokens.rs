@@ -35,9 +35,10 @@ pub fn normalize_once(t: Token) -> Option<Token> {
     // remove the value of the tokens as well
 
     match t {
-        Token::Word(w) => Some(Token::Word(Word { value: String::new(), quote_style: None, keyword: w.keyword })), // keep only the keyword
+        Token::Word(w) => Some(Token::Word(w)), // keep all
+        // Token::Word(w) => Some(Token::Word(Word { value: String::new(), quote_style: None, keyword: w.keyword })), // keep only the keyword
         Token::Number(_,_) => Some(Token::Number(String::from("0"),true)),
-        Token::Char(_) => Some(Token::Char(' ')),
+        Token::Char(_) => Some(Token::Char('_')),
         Token::SingleQuotedString(_) => Some(Token::SingleQuotedString(String::new())),
         Token::NationalStringLiteral(_) => Some(Token::NationalStringLiteral(String::new())),
         Token::HexStringLiteral(_) => Some(Token::HexStringLiteral(String::new())),
