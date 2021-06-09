@@ -2,6 +2,8 @@ use std::io::BufReader;
 use std::fs::File;
 use std::io::BufRead;
 use std::time::SystemTime;
+use std::env;
+use std::process;
 
 mod template;
 mod ids;
@@ -9,22 +11,42 @@ mod tokens;
 use ids::Ids;
 
 fn main() -> std::io::Result<()> {
+    let args: Vec<String> = env::args().collect();
+    let (query_file, trusted_query_file) = match args.len() {
+        2 | 3 => (args[1].clone(), args.get(2)),
+        _ => {
+            println!("Usage: {} queries.txt [trusted_queries.txt]", args[0]);
+            process::exit(0);
+        }
+    };
+
     let mut ids = Ids::new();
     let mut nb = 0;
-    // let f = File::open("queries.txt")?;
-    let f = File::open("../../log_v3.txt")?;
+
+    match trusted_query_file {
+        Some(f) => {
+            let f = File::open(f)?;
+            let reader = BufReader::new(f);
+            for line in reader.lines()  {
+                match line {
+                    Ok(l) => { 
+                        ids.handle_req(&l, true);
+                    }
+                    Err(e) => println!("Error : {}", e)
+                };
+            }
+        },
+        None => ()
+    };
+    let f = File::open(query_file)?;
     let reader = BufReader::new(f);
     let before = SystemTime::now();
     let iter = reader.lines();
-    let len = iter.size_hint().1;
     for line in iter {
         nb += 1;
-        // if nb%100 == 0 {
-        //     match len {
-        //         Some(upper) => println!("{}/{}",nb,upper),
-        //         None => println!("{}",nb)
-        //     }
-        // }
+        if nb%100 == 0 {
+            println!("{}",nb)
+        }
         match line {
             Ok(l) => {
                 let fate = ids.handle_req(&l,false);
