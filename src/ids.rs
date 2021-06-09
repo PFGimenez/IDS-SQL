@@ -136,7 +136,9 @@ impl Ids {
         let norm_tokens = normalize(tokens.clone());
         match self.templates.get_mut(&norm_tokens) {
             Some((queries, old_template, _)) => {
-                queries.push((query,trusted));
+                if !trusted || !queries.iter().any(|(s,_)| s==&query) { // don't put duplicate (if not trusted, we are sure it's not a duplicate)
+                    queries.push((query,trusted));
+                }
                 let t = Ids::create_template_from_queries(queries);
                 // println!("New template: {}", t);
                 if &t != old_template {
