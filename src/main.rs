@@ -10,7 +10,7 @@ use ids::Ids;
 fn main() -> std::io::Result<()> {
     let mut ids = Ids::new();
 
-    let f = File::open("queries.txt")?;
+    let f = File::open("queries2.txt")?;
     let reader = BufReader::new(f);
     for line in reader.lines() {
         let l = line.unwrap();
