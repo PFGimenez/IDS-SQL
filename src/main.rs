@@ -4,13 +4,45 @@ use std::io::BufRead;
 use std::time::SystemTime;
 use std::env;
 use std::process;
+use std::sync::mpsc;
+use std::thread;
 
 mod template;
 mod ids;
 mod tokens;
 use ids::{Ids,ReqFate};
 
+const NB_THREADS: usize = 12;
+
 fn main() -> std::io::Result<()> {
+
+    let mut ids = Ids::new();
+    let mut threads = Vec::new();
+
+    for _i in 0..NB_THREADS {
+        let (tx1, rx1) = mpsc::channel();
+        // let (tx2, rx2) = mpsc::channel();
+        let mut ids_lock = ids.clone();
+        threads.push((tx1,thread::spawn(move || {
+                                loop {
+                                    let s: Option<String> = rx1.recv().unwrap();
+                                    match s {
+                                        None => break,
+                                        Some(s) => {
+                                            let fate = Ids::handle_req(&mut ids_lock, &s, false);
+                                            // tx2.send(fate).unwrap();
+                                            // match fate {
+                                            //     ReqFate::Unknown => unknown_nb += 1,
+                                            //     ReqFate::Pass(_) | ReqFate::Trusted => pass_nb += 1,
+                                            //     ReqFate::Del(_) | ReqFate::TokenError => del_nb += 1
+                                            // };
+                                            println!("{}: {}", s, fate);
+                                        }
+                                    }
+                                }
+                            })));
+    }
+
     let args: Vec<String> = env::args().collect();
     let (query_file, trusted_query_file) = match args.len() {
         2 | 3 => (args[1].clone(), args.get(2)),
@@ -20,7 +52,6 @@ fn main() -> std::io::Result<()> {
         }
     };
 
-    let mut ids = Ids::new();
     let mut nb = 0;
 
     match trusted_query_file {
@@ -29,8 +60,8 @@ fn main() -> std::io::Result<()> {
             let reader = BufReader::new(f);
             for line in reader.lines()  {
                 match line {
-                    Ok(l) => { 
-                        ids.handle_req(&l, true);
+                    Ok(l) => {
+                        Ids::handle_req(&mut ids, &l, true);
                     }
                     Err(e) => println!("Error : {}", e)
                 };
@@ -44,9 +75,9 @@ fn main() -> std::io::Result<()> {
     let reader = BufReader::new(f);
     let before = SystemTime::now();
     let iter = reader.lines();
-    let mut pass_nb = 0;
-    let mut unknown_nb = 0;
-    let mut del_nb = 0;
+    // let mut pass_nb = 0;
+    // let mut unknown_nb = 0;
+    // let mut del_nb = 0;
     for line in iter {
         nb += 1;
         if nb%100 == 0 {
@@ -54,24 +85,25 @@ fn main() -> std::io::Result<()> {
         }
         match line {
             Ok(l) => {
-                let fate = ids.handle_req(&l,false);
-                match fate {
-                    ReqFate::Unknown => unknown_nb += 1,
-                    ReqFate::Pass(_) | ReqFate::Trusted => pass_nb += 1,
-                    ReqFate::Del(_) | ReqFate::TokenError => del_nb += 1
-                };
-                println!("{}: {}", l, fate);
+                threads[nb%NB_THREADS].0.send(Some(l.clone())).unwrap();
+                // let fate = Ids::handle_req(&mut ids, &l,false);
             },
             Err(e) => println!("Error : {}", e)
         }
     }
+
+    for (tx,thr) in threads {
+        tx.send(None).unwrap();
+        let _ = thr.join();
+    }
+
     let nb = nb as f64;
     let dur = SystemTime::now().duration_since(before.clone()).unwrap().as_millis() as f64;
-    println!("Duration: {}ms per query (total: {}ms)", dur/nb, dur);
-    println!("Number of pass: {}", pass_nb);
-    println!("Number of del: {}", del_nb);
-    println!("Number of unknown: {}", unknown_nb);
-    ids.summarize();
+    println!("Duration: {}ms per query (total: {}s)", dur/nb, dur/1000.);
+    // println!("Number of pass: {}", pass_nb);
+    // println!("Number of del: {}", del_nb);
+    // println!("Number of unknown: {}", unknown_nb);
+    Ids::summarize(&ids);
     Ok(())
 }
 

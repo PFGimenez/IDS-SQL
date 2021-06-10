@@ -1,5 +1,5 @@
-//use std::sync::RwLock TODO
-use std::time::SystemTime;
+use std::sync::{Arc, RwLock};
+// use std::time::SystemTime;
 use std::collections::HashMap;
 use std::fmt;
 
@@ -27,47 +27,47 @@ impl fmt::Display for ReqFate {
     }
 }
 
-const EXPIRY_DURATION : u64 = 60;
+// const EXPIRY_DURATION : u64 = 60;
 
 pub struct Ids {
-    templates: HashMap<NormalizedTokens, (Vec<(String,bool)>, Template, std::time::SystemTime)>
+    templates: HashMap<NormalizedTokens, (Vec<(String,bool)>, Template/*, std::time::SystemTime*/)>
 }
 
 impl Ids {
-    pub fn new() -> Ids {
-        Ids { templates: HashMap::new() }
+    pub fn new() -> Arc<RwLock<Ids>> {
+        Arc::new(RwLock::new(Ids { templates: HashMap::new() }))
     }
 
-    pub fn handle_req(&mut self, req: &str, trusted: bool) -> ReqFate {
+    pub fn handle_req(ids_lock: &mut Arc<RwLock<Ids>>, req: &str, trusted: bool) -> ReqFate {
         // println!("Received queries: {}",req);
         // println!("{:?}",tokenize(req));
         if trusted {
-            self.learn(req.to_string(), true);
+            ids_lock.write().unwrap().learn(req.to_string(), true);
             ReqFate::Trusted
         }
         else {
-            let out = self.verify_req(req);
+            let out = ids_lock.read().unwrap().verify_req(req);
             match out {
-                ReqFate::Unknown => self.learn(req.to_string(), false),
+                ReqFate::Unknown => ids_lock.write().unwrap().learn(req.to_string(), false),
                 _ => ()
             };
             out
         }
     }
 
-    fn verify_req(&mut self, req: &str) -> ReqFate {
+    fn verify_req(&self, req: &str) -> ReqFate {
         let tokens = match tokenize(req) {
             Ok(t) => t,
             Err(_) => return ReqFate::TokenError
         };
         let norm_tokens = normalize(tokens.clone());
         let mut invalid_templates = Vec::new();
-        for (_,(_,t,last_use)) in self.templates.iter_mut() {
+        for (_,(_,t/*,last_use*/)) in self.templates.iter() {
             if t.is_match(req) {
                 // println!("Match with {}", t.1);
                 invalid_templates.push(format!("{}",t));
                 if t.is_legitimate(&norm_tokens) {
-                    *last_use = SystemTime::now();
+                    // *last_use = SystemTime::now();
                     return ReqFate::Pass(format!("{}",t));
                 }
             }
@@ -90,7 +90,7 @@ impl Ids {
             };
             true
         };
-        for (_,(queries,other_t,_)) in self.templates.iter_mut() {
+        for (_,(queries,other_t)) in self.templates.iter_mut() {
             let size_before = queries.len();
             if &t != other_t {
                 queries.retain(retain);
@@ -106,7 +106,7 @@ impl Ids {
             }
         }
         // remove templates without queries
-        self.templates.retain(|_,(queries,_,last_time)| !queries.is_empty() && SystemTime::now().duration_since(last_time.clone()).unwrap().as_secs() < EXPIRY_DURATION); // TODO
+        self.templates.retain(|_,(queries,_/*,last_time*/)| !queries.is_empty() /*&& SystemTime::now().duration_since(last_time.clone()).unwrap().as_secs() < EXPIRY_DURATION*/);
     }
 
     fn create_template_from_queries(queries: &Vec<(String,bool)>) -> Template {
@@ -139,7 +139,7 @@ impl Ids {
         let tokens = tokenize(&query).unwrap();
         let norm_tokens = normalize(tokens.clone());
         match self.templates.get_mut(&norm_tokens) {
-            Some((queries, old_template, _)) => {
+            Some((queries, old_template)) => {
                 if !trusted || !queries.iter().any(|(s,_)| s==&query) { // don't put duplicate (if not trusted, we are sure it's not a duplicate)
                     queries.push((query,trusted));
                 }
@@ -154,7 +154,7 @@ impl Ids {
             None => {
                 let t = Template::new(&tokens, Vec::new());
                 // println!("New template: {}", t);
-                self.templates.insert(norm_tokens, (vec![(query,trusted)], t, SystemTime::now()));
+                self.templates.insert(norm_tokens, (vec![(query,trusted)], t/*, SystemTime::now()*/));
             }
         };
         match clean_with_template {
@@ -163,10 +163,12 @@ impl Ids {
         }
     }
 
-    pub fn summarize(&self) {
-        println!("There are {} inferred templated:",self.templates.len());
-        for (_,(queries,template,last_time)) in self.templates.iter() {
-            println!("{} (last use: {:?}s ago)", template, SystemTime::now().duration_since(last_time.clone()).unwrap().as_secs());
+    pub fn summarize(ids_lock: &Arc<RwLock<Ids>>) {
+        let ids = ids_lock.read().unwrap();
+        println!("There are {} inferred templated:", ids.templates.len());
+        for (_,(queries,template/*,last_time*/)) in ids.templates.iter() {
+            // println!("{} (last use: {:?}s ago)", template, SystemTime::now().duration_since(last_time.clone()).unwrap().as_secs());
+            println!("{}", template);
             for q in queries.iter() {
                 println!("\t{} (trusted: {})",q.0, q.1);
             }
