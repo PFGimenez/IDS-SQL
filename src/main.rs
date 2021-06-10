@@ -30,12 +30,12 @@ fn main() -> std::io::Result<()> {
             for line in reader.lines()  {
                 match line {
                     Ok(l) => { 
-                        ids.handle_req(&l, true).ok();
+                        ids.handle_req(&l, true);
                     }
                     Err(e) => println!("Error : {}", e)
                 };
             };
-            ids.summarize();
+            // ids.summarize();
         },
         None => ()
     };
@@ -56,17 +56,11 @@ fn main() -> std::io::Result<()> {
             Ok(l) => {
                 let fate = ids.handle_req(&l,false);
                 match fate {
-                    Ok(f) => {
-                        match f {
-                            ReqFate::Unknown => unknown_nb += 1,
-                            ReqFate::Pass(_) => pass_nb += 1,
-                            ReqFate::Del(_) => del_nb += 1,
-                            ReqFate::Trusted => (),
-                        }
-                        println!("{}: {}", l, f)
-                    },
-                    Err(e) => println!("Error: {:?}", e)
-                }
+                    ReqFate::Unknown => unknown_nb += 1,
+                    ReqFate::Pass(_) | ReqFate::Trusted => pass_nb += 1,
+                    ReqFate::Del(_) | ReqFate::TokenError => del_nb += 1
+                };
+                println!("{}: {}", l, fate);
             },
             Err(e) => println!("Error : {}", e)
         }

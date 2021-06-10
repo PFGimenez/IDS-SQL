@@ -3,7 +3,6 @@ use std::time::SystemTime;
 use std::collections::HashMap;
 use std::fmt;
 
-use sqlparser::tokenizer::TokenizerError;
 use crate::template::Template;
 use crate::tokens::*;
 
@@ -12,7 +11,8 @@ pub enum ReqFate {
     Unknown,
     Trusted,
     Pass(String),
-    Del(Vec<String>)
+    Del(Vec<String>),
+    TokenError
 }
 
 impl fmt::Display for ReqFate {
@@ -22,6 +22,7 @@ impl fmt::Display for ReqFate {
             ReqFate::Trusted => write!(f, "Trusted"),
             ReqFate::Pass(t) => write!(f, "Pass: validated by template {}", t),
             ReqFate::Del(t) => write!(f, "Del: invalidated by templates {:?}", t),
+            ReqFate::TokenError => write!(f, "Del: tokenization error"),
         }
     }
 }
@@ -37,25 +38,28 @@ impl Ids {
         Ids { templates: HashMap::new() }
     }
 
-    pub fn handle_req(&mut self, req: &str, trusted: bool) -> Result<ReqFate,TokenizerError> {
+    pub fn handle_req(&mut self, req: &str, trusted: bool) -> ReqFate {
         // println!("Received queries: {}",req);
         // println!("{:?}",tokenize(req));
         if trusted {
             self.learn(req.to_string(), true);
-            Ok(ReqFate::Trusted)
+            ReqFate::Trusted
         }
         else {
-            let out = self.verify_req(req)?;
+            let out = self.verify_req(req);
             match out {
                 ReqFate::Unknown => self.learn(req.to_string(), false),
                 _ => ()
             };
-            Ok(out)
+            out
         }
     }
 
-    fn verify_req(&mut self, req: &str) -> Result<ReqFate,TokenizerError> {
-        let tokens = tokenize(req)?;
+    fn verify_req(&mut self, req: &str) -> ReqFate {
+        let tokens = match tokenize(req) {
+            Ok(t) => t,
+            Err(_) => return ReqFate::TokenError
+        };
         let norm_tokens = normalize(tokens.clone());
         let mut invalid_templates = Vec::new();
         for (_,(_,t,last_use)) in self.templates.iter_mut() {
@@ -64,13 +68,13 @@ impl Ids {
                 invalid_templates.push(format!("{}",t));
                 if t.is_legitimate(&norm_tokens) {
                     *last_use = SystemTime::now();
-                    return Ok(ReqFate::Pass(format!("{}",t)));
+                    return ReqFate::Pass(format!("{}",t));
                 }
             }
         }
         match invalid_templates.is_empty() {
-            false => Ok(ReqFate::Del(invalid_templates)),
-            true => Ok(ReqFate::Unknown)
+            false =>ReqFate::Del(invalid_templates),
+            true => ReqFate::Unknown
         }
     }
 
