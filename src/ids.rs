@@ -1,3 +1,5 @@
+use sqlparser::tokenizer::Token;
+
 use std::sync::{Arc, RwLock};
 // use std::time::SystemTime;
 use std::collections::HashMap;
@@ -109,6 +111,13 @@ impl Ids {
         self.templates.retain(|_,(queries,_/*,last_time*/)| !queries.is_empty() /*&& SystemTime::now().duration_since(last_time.clone()).unwrap().as_secs() < EXPIRY_DURATION*/);
     }
 
+    fn is_considered_variable(t: &Token) -> bool {
+        match t {
+            Token::Number(_,_) | Token::Char(_) | Token::SingleQuotedString(_) | Token::NationalStringLiteral(_) | Token::HexStringLiteral(_) => true,
+            _ => false
+        }
+    }
+
     fn create_template_from_queries(queries: &Vec<(String,bool)>) -> Template {
         assert!(!queries.is_empty());
         let tokens = tokenize(&queries.last().unwrap().0).unwrap(); // we know the string is valid
@@ -120,7 +129,7 @@ impl Ids {
             // let mut current = false;
             for q in queries.iter() {
                 let q = prune(tokenize(&q.0).unwrap());
-                if &q.0[i] != t {
+                if Ids::is_considered_variable(&q.0[i]) || &q.0[i] != t {
                     injections.push(i);
                     // current = true;
                     // assert!(!last);

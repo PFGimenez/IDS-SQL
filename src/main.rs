@@ -12,7 +12,7 @@ mod ids;
 mod tokens;
 use ids::{Ids,ReqFate};
 
-const NB_THREADS: usize = 12;
+const NB_THREADS: usize = 1;
 
 fn main() -> std::io::Result<()> {
 
@@ -20,23 +20,22 @@ fn main() -> std::io::Result<()> {
     let mut threads = Vec::new();
 
     for _i in 0..NB_THREADS {
-        let (tx1, rx1) = mpsc::channel();
-        // let (tx2, rx2) = mpsc::channel();
+        let (tx, rx) = mpsc::channel();
         let mut ids_lock = ids.clone();
-        threads.push((tx1,thread::spawn(move || {
+        threads.push((tx,thread::spawn(move || {
                                 loop {
-                                    let s: Option<String> = rx1.recv().unwrap();
+                                    let s: Option<String> = rx.recv().unwrap();
                                     match s {
                                         None => break,
                                         Some(s) => {
                                             let fate = Ids::handle_req(&mut ids_lock, &s, false);
-                                            // tx2.send(fate).unwrap();
-                                            // match fate {
-                                            //     ReqFate::Unknown => unknown_nb += 1,
-                                            //     ReqFate::Pass(_) | ReqFate::Trusted => pass_nb += 1,
-                                            //     ReqFate::Del(_) | ReqFate::TokenError => del_nb += 1
-                                            // };
-                                            println!("{}: {}", s, fate);
+                                            match fate {
+                                                ReqFate::Unknown => println!("UNKNOWN {} ({})", s, fate),
+                                                ReqFate::Trusted => println!("OK {} ({})", s, fate),
+                                                ReqFate::Pass(_) => println!("OK {} ({})", s, fate),
+                                                ReqFate::Del(_) => println!("KO {} ({})", s, fate),
+                                                ReqFate::TokenError => println!("KO {} ({})", s, fate),
+                                            }
                                         }
                                     }
                                 }
@@ -66,7 +65,7 @@ fn main() -> std::io::Result<()> {
                     Err(e) => println!("Error : {}", e)
                 };
             };
-            // ids.summarize();
+            Ids::summarize(&ids);
         },
         None => ()
     };
@@ -75,18 +74,11 @@ fn main() -> std::io::Result<()> {
     let reader = BufReader::new(f);
     let before = SystemTime::now();
     let iter = reader.lines();
-    // let mut pass_nb = 0;
-    // let mut unknown_nb = 0;
-    // let mut del_nb = 0;
     for line in iter {
         nb += 1;
-        if nb%100 == 0 {
-            println!("{}",nb)
-        }
         match line {
             Ok(l) => {
                 threads[nb%NB_THREADS].0.send(Some(l.clone())).unwrap();
-                // let fate = Ids::handle_req(&mut ids, &l,false);
             },
             Err(e) => println!("Error : {}", e)
         }
@@ -100,11 +92,6 @@ fn main() -> std::io::Result<()> {
     let nb = nb as f64;
     let dur = SystemTime::now().duration_since(before.clone()).unwrap().as_millis() as f64;
     println!("Duration: {}ms per query (total: {}s)", dur/nb, dur/1000.);
-    // println!("Number of pass: {}", pass_nb);
-    // println!("Number of del: {}", del_nb);
-    // println!("Number of unknown: {}", unknown_nb);
-    Ids::summarize(&ids);
+    // Ids::summarize(&ids);
     Ok(())
 }
-
-
