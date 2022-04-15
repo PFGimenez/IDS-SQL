@@ -2,6 +2,7 @@ use std::fmt;
 use regex::Regex;
 use sqlparser::tokenizer::Token;
 use crate::tokens::{normalize_once,NormalizedTokens,RawTokens,is_whitespace};
+use log::{debug,trace};
 
 #[derive(Debug, Clone)]
 pub struct Template {
@@ -49,10 +50,10 @@ impl Template {
                         },
                     _ => (String::new(), String::new())
                 };
-
-                printable += &(l.clone() + "[[INJECTION]]" + &r);
+                let nt = normalize_once(t.clone()).unwrap();
+                printable += &(l.clone() + "[[INJECTION " + format!("{:?}",nt).as_str() + "]]" + &r);
                 regex += &(l + ".*" + &r);
-                inj_tokens.push((normalize_once(t.clone()).unwrap(), new_index)); // unwrap is safe due to condition
+                inj_tokens.push((nt, new_index)); // unwrap is safe due to condition
                 next_inj_index = inj_indexes.pop();
             }
             else {
@@ -64,7 +65,7 @@ impl Template {
             }
         }
         regex += "$";
-        // println!("Regex: {}", regex);
+        trace!("Generated regex: {}", regex);
         Template { printable, re: Regex::new(&regex).unwrap(), norm_length: new_index, inj_tokens }
     }
 
@@ -74,12 +75,13 @@ impl Template {
 
     pub fn is_legitimate(&self, input: &NormalizedTokens) -> bool {
         if input.0.len() != self.norm_length { // wrong size
+            debug!("Injection detected! Expected length: {:?}. Received length: {:?}.", self.norm_length, input.0.len());
             false
         } else {
             for (t1,u) in self.inj_tokens.iter() { // only check the injections
                 let t2 = &input.0[*u];
                 if t1 != t2 {
-                    // println!("Injection detected ! Expected: {:?}. Received: {:?}.", t1, t2);
+                    debug!("Injection detected! Expected: {:?}. Received: {:?}.", t1, t2);
                     return false
                 }
             }

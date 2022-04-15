@@ -1,4 +1,5 @@
 use sqlparser::tokenizer::Token;
+use log::{info, debug, trace};
 
 use std::sync::{Arc, RwLock};
 // use std::time::SystemTime;
@@ -31,18 +32,39 @@ impl fmt::Display for ReqFate {
 
 // const EXPIRY_DURATION : u64 = 60;
 
+#[derive(Debug, Eq, Hash, PartialEq)]
+pub enum PredResult {
+    FP,
+    FN,
+    TP,
+    TN
+}
+
 pub struct Ids {
-    templates: HashMap<NormalizedTokens, (Vec<(String,bool)>, Template/*, std::time::SystemTime*/)>
+    templates: HashMap<NormalizedTokens, (Vec<(String,bool)>, Template/*, std::time::SystemTime*/)>,
+    results: HashMap<PredResult, Vec<String>>
 }
 
 impl Ids {
     pub fn new() -> Arc<RwLock<Ids>> {
-        Arc::new(RwLock::new(Ids { templates: HashMap::new() }))
+        Arc::new(RwLock::new(Ids { templates: HashMap::new(), results: HashMap::new() }))
+    }
+
+    pub fn add_result(ids_lock: &mut Arc<RwLock<Ids>>, pred: PredResult, req: String) {
+        let mut ids = ids_lock.write().unwrap();
+        let count = ids.results.entry(pred).or_insert(Vec::new());
+        count.push(req);
+    }
+
+    pub fn show_results(ids_lock: &Arc<RwLock<Ids>>) {
+        for (key, val) in ids_lock.read().unwrap().results.iter() {
+            info!("{:?}: {:?}", key, val.len())
+        }
     }
 
     pub fn handle_req(ids_lock: &mut Arc<RwLock<Ids>>, req: &str, trusted: bool) -> ReqFate {
-        // println!("Received queries: {}",req);
-        // println!("{:?}",tokenize(req));
+        trace!("Received query: {}",req);
+        trace!("Tokenized version: {:?}",tokenize(req));
         if trusted {
             ids_lock.write().unwrap().learn(req.to_string(), true);
             ReqFate::Trusted
@@ -63,20 +85,24 @@ impl Ids {
             Err(_) => return ReqFate::TokenError
         };
         let norm_tokens = normalize(tokens.clone());
+        // debug!("Normalized version: {:?}",norm_tokens);
         let mut invalid_templates = Vec::new();
         for (_,(_,t/*,last_use*/)) in self.templates.iter() {
             if t.is_match(req) {
-                // println!("Match with {}", t.1);
+                debug!("Match with {}", t);
                 invalid_templates.push(format!("{}",t));
                 if t.is_legitimate(&norm_tokens) {
                     // *last_use = SystemTime::now();
                     return ReqFate::Pass(format!("{}",t));
                 }
+                else {
+                    debug!("Attack detected: {}", req);
+                }
             }
         }
         match invalid_templates.is_empty() {
-            false =>ReqFate::Del(invalid_templates),
-            true => ReqFate::Unknown
+            false => ReqFate::Del(invalid_templates),
+            true  => ReqFate::Unknown
         }
     }
 
@@ -86,7 +112,7 @@ impl Ids {
             if !trusted && t.is_match(&req) {
                 let norm_tokens = normalize(tokenize(&req).unwrap()); // we know that these strings are valid
                 if !t.is_legitimate(&norm_tokens) {
-                    // println!("Removed query: {}", req);
+                    debug!("Removed query: {}", req);
                     return false
                 }
             };
@@ -100,10 +126,10 @@ impl Ids {
             if size_before != queries.len() {
                 if !queries.is_empty() {
                     // update queries with removed malicious queries
-                    // println!("Template update");
+                    debug!("Template update");
                     *other_t = Ids::create_template_from_queries(queries);
                 } else {
-                    // println!("Template removed!");
+                    debug!("Template removed!");
                 }
             }
         }
@@ -153,16 +179,17 @@ impl Ids {
                     queries.push((query,trusted));
                 }
                 let t = Ids::create_template_from_queries(queries);
-                // println!("New template: {}", t);
                 if &t != old_template {
-                    // println!("Template update");
+                    debug!("Template update: {} => {}", old_template, t);
                     clean_with_template = Some(t.clone());
                     *old_template = t;
+                } else {
+                    debug!("New template: {}", t);
                 }
             },
             None => {
                 let t = Template::new(&tokens, Vec::new());
-                // println!("New template: {}", t);
+                debug!("New template: {}", t);
                 self.templates.insert(norm_tokens, (vec![(query,trusted)], t/*, SystemTime::now()*/));
             }
         };
@@ -174,12 +201,12 @@ impl Ids {
 
     pub fn summarize(ids_lock: &Arc<RwLock<Ids>>) {
         let ids = ids_lock.read().unwrap();
-        println!("There are {} inferred templated:", ids.templates.len());
+        info!("There are {} inferred templates:", ids.templates.len());
         for (_,(queries,template/*,last_time*/)) in ids.templates.iter() {
             // println!("{} (last use: {:?}s ago)", template, SystemTime::now().duration_since(last_time.clone()).unwrap().as_secs());
-            println!("{}", template);
+            info!("{}", template);
             for q in queries.iter() {
-                println!("\t{} (trusted: {})",q.0, q.1);
+                info!("\tbuild from {} (trusted: {})",q.0, q.1);
             }
         }
     }

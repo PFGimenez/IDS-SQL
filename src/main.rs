@@ -6,15 +6,23 @@ use std::env;
 use std::process;
 use std::sync::mpsc;
 use std::thread;
+use log::{error,warn,info};
 
 mod template;
 mod ids;
 mod tokens;
-use ids::{Ids,ReqFate};
+use ids::{Ids,ReqFate,PredResult};
+
+#[derive(Debug)]
+pub enum Class {
+    Benign,
+    Attack
+}
 
 const NB_THREADS: usize = 1;
 
 fn main() -> std::io::Result<()> {
+    env_logger::init();
 
     let mut ids = Ids::new();
     let mut threads = Vec::new();
@@ -24,18 +32,18 @@ fn main() -> std::io::Result<()> {
         let mut ids_lock = ids.clone();
         threads.push((tx,thread::spawn(move || {
                                 loop {
-                                    let s: Option<String> = rx.recv().unwrap();
+                                    let s: Option<(String, Class)> = rx.recv().unwrap();
                                     match s {
                                         None => break,
-                                        Some(s) => {
+                                        Some((s,class)) => {
                                             let fate = Ids::handle_req(&mut ids_lock, &s, false);
-                                            match fate {
-                                                ReqFate::Unknown => println!("UNKNOWN {} ({})", s, fate),
-                                                ReqFate::Trusted => println!("OK {} ({})", s, fate),
-                                                ReqFate::Pass(_) => println!("OK {} ({})", s, fate),
-                                                ReqFate::Del(_) => println!("KO {} ({})", s, fate),
-                                                ReqFate::TokenError => println!("KO {} ({})", s, fate),
-                                            }
+                                            let pred = match (&fate, class) {
+                                                (ReqFate::Unknown | ReqFate::Trusted | ReqFate::Pass(_), Class::Benign) => PredResult::TN,
+                                                (ReqFate::Unknown | ReqFate::Trusted | ReqFate::Pass(_), Class::Attack) => {warn!("FN: {} ({})", s, fate); PredResult::FN},
+                                                (ReqFate::Del(_) | ReqFate::TokenError, Class::Attack) => PredResult::TP,
+                                                (ReqFate::Del(_) | ReqFate::TokenError, Class::Benign) => {error!("FP: {} ({})", s, fate); PredResult::FP},
+                                            };
+                                            Ids::add_result(&mut ids_lock, pred, s.clone());
                                         }
                                     }
                                 }
@@ -62,7 +70,7 @@ fn main() -> std::io::Result<()> {
                     Ok(l) => {
                         Ids::handle_req(&mut ids, &l, true);
                     }
-                    Err(e) => println!("Error : {}", e)
+                    Err(e) => error!("Error : {}", e)
                 };
             };
             Ids::summarize(&ids);
@@ -73,14 +81,21 @@ fn main() -> std::io::Result<()> {
     let f = File::open(query_file)?;
     let reader = BufReader::new(f);
     let before = SystemTime::now();
-    let iter = reader.lines();
-    for line in iter {
-        nb += 1;
-        match line {
-            Ok(l) => {
-                threads[nb%NB_THREADS].0.send(Some(l.clone())).unwrap();
+    let mut iter = reader.lines();
+    loop {
+
+        match (iter.next(),iter.next())
+        {
+            (Some(l), Some(class)) => {
+                let class = match class?.as_str()
+                    {
+                        "0" => Class::Benign,
+                        _ => Class::Attack
+                    };
+                nb += 1;
+                threads[nb%NB_THREADS].0.send(Some((l?.clone(),class))).unwrap()
             },
-            Err(e) => println!("Error : {}", e)
+            _ => break
         }
     }
 
@@ -91,7 +106,8 @@ fn main() -> std::io::Result<()> {
 
     let nb = nb as f64;
     let dur = SystemTime::now().duration_since(before.clone()).unwrap().as_millis() as f64;
-    println!("Duration: {}ms per query (total: {}s)", dur/nb, dur/1000.);
-    // Ids::summarize(&ids);
+    info!("Duration: {}ms per query (total: {}s)", dur/nb, dur/1000.);
+    Ids::summarize(&ids);
+    Ids::show_results(&ids);
     Ok(())
 }

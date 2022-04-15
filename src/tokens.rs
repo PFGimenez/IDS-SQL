@@ -44,6 +44,7 @@ pub fn normalize_once(t: Token) -> Option<Token> {
         Token::Whitespace(Whitespace::Space) => None,
         Token::Whitespace(Whitespace::Newline) => None,
         Token::Whitespace(Whitespace::Tab) => None,
+        Token::Minus => None, // we remove the "-" symbols so -21 and 23 are transformed into the same token
         _ => Some(t)
     }
 
@@ -54,6 +55,7 @@ pub fn is_whitespace(t: &Token) -> bool {
         Token::Whitespace(Whitespace::Space) => true,
         Token::Whitespace(Whitespace::Newline) => true,
         Token::Whitespace(Whitespace::Tab) => true,
+        Token::Minus => true,
         _ => false
     }
 }
